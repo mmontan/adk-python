@@ -54,6 +54,12 @@ class ApiRegistry:
     self._credentials, _ = google.auth.default()
     self._mcp_servers: dict[str, dict[str, Any]] = {}
     self._header_provider = header_provider
+    self._loaded = False
+
+  def _load_mcp_servers(self) -> None:
+    """Lazily loads MCP servers from the API Registry."""
+    if self._loaded:
+      return
 
     url = f"{API_REGISTRY_URL}/v1beta/projects/{self.api_registry_project_id}/locations/{self.location}/mcpServers"
     try:
@@ -67,6 +73,7 @@ class ApiRegistry:
           server_name = server.get("name", "")
           if server_name:
             self._mcp_servers[server_name] = server
+      self._loaded = True
     except (httpx.HTTPError, ValueError) as e:
       # Handle error in fetching or parsing tool definitions
       raise RuntimeError(
@@ -91,6 +98,7 @@ class ApiRegistry:
     Returns:
       McpToolset: A toolset for the MCP server specified.
     """
+    self._load_mcp_servers()
     server = self._mcp_servers.get(mcp_server_name)
     if not server:
       raise ValueError(

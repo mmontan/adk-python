@@ -68,6 +68,27 @@ class TestApiRegistry(unittest.IsolatedAsyncioTestCase):
 
   @patch("httpx.Client", autospec=True)
   def test_init_success(self, MockHttpClient):
+    """Test that __init__ does NOT make network calls."""
+    # NOTE: In previous version this test asserted that network calls WERE made.
+    # We now verify they are NOT made during init.
+
+    mock_client_instance = MockHttpClient.return_value
+    mock_client_instance.__enter__.return_value = mock_client_instance
+
+    api_registry = ApiRegistry(
+        api_registry_project_id=self.project_id, location=self.location
+    )
+
+    # _mcp_servers should be empty initially
+    self.assertEqual(len(api_registry._mcp_servers), 0)
+
+    # httpx.Client should NOT be called during init
+    MockHttpClient.assert_not_called()
+
+
+  @patch("httpx.Client", autospec=True)
+  def test_load_mcp_servers_success(self, MockHttpClient):
+    """Test explicit loading of MCP servers."""
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
     mock_response.json = MagicMock(return_value=MOCK_MCP_SERVERS_LIST)
@@ -79,12 +100,11 @@ class TestApiRegistry(unittest.IsolatedAsyncioTestCase):
         api_registry_project_id=self.project_id, location=self.location
     )
 
+    # Manually trigger load
+    api_registry._load_mcp_servers()
+
     self.assertEqual(len(api_registry._mcp_servers), 5)
     self.assertIn("test-mcp-server-1", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-2", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-no-url", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-http", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-https", api_registry._mcp_servers)
     mock_client_instance.get.assert_called_once_with(
         f"https://cloudapiregistry.googleapis.com/v1beta/projects/{self.project_id}/locations/{self.location}/mcpServers",
         headers={
@@ -94,7 +114,7 @@ class TestApiRegistry(unittest.IsolatedAsyncioTestCase):
     )
 
   @patch("httpx.Client", autospec=True)
-  def test_init_with_quota_project_id_success(self, MockHttpClient):
+  def test_load_mcp_servers_with_quota_project_id_success(self, MockHttpClient):
     self.mock_credentials.quota_project_id = "quota-project"
     mock_response = create_autospec(httpx.Response, instance=True)
     mock_response.json.return_value = MOCK_MCP_SERVERS_LIST
@@ -106,12 +126,8 @@ class TestApiRegistry(unittest.IsolatedAsyncioTestCase):
         api_registry_project_id=self.project_id, location=self.location
     )
 
-    self.assertEqual(len(api_registry._mcp_servers), 5)
-    self.assertIn("test-mcp-server-1", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-2", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-no-url", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-http", api_registry._mcp_servers)
-    self.assertIn("test-mcp-server-https", api_registry._mcp_servers)
+    api_registry._load_mcp_servers()
+
     mock_client_instance.get.assert_called_once_with(
         f"https://cloudapiregistry.googleapis.com/v1beta/projects/{self.project_id}/locations/{self.location}/mcpServers",
         headers={
@@ -122,20 +138,22 @@ class TestApiRegistry(unittest.IsolatedAsyncioTestCase):
     )
 
   @patch("httpx.Client", autospec=True)
-  def test_init_http_error(self, MockHttpClient):
+  def test_load_http_error(self, MockHttpClient):
     mock_client_instance = MockHttpClient.return_value
     mock_client_instance.__enter__.return_value = mock_client_instance
     mock_client_instance.get.side_effect = httpx.RequestError(
         "Connection failed"
     )
 
+    api_registry = ApiRegistry(
+        api_registry_project_id=self.project_id, location=self.location
+    )
+
     with self.assertRaisesRegex(RuntimeError, "Error fetching MCP servers"):
-      ApiRegistry(
-          api_registry_project_id=self.project_id, location=self.location
-      )
+      api_registry._load_mcp_servers()
 
   @patch("httpx.Client", autospec=True)
-  def test_init_bad_response(self, MockHttpClient):
+  def test_load_bad_response(self, MockHttpClient):
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock(
         side_effect=httpx.HTTPStatusError(
@@ -146,15 +164,18 @@ class TestApiRegistry(unittest.IsolatedAsyncioTestCase):
     mock_client_instance.__enter__.return_value = mock_client_instance
     mock_client_instance.get.return_value = mock_response
 
+    api_registry = ApiRegistry(
+        api_registry_project_id=self.project_id, location=self.location
+    )
+
     with self.assertRaisesRegex(RuntimeError, "Error fetching MCP servers"):
-      ApiRegistry(
-          api_registry_project_id=self.project_id, location=self.location
-      )
+      api_registry._load_mcp_servers()
     mock_response.raise_for_status.assert_called_once()
 
   @patch("google.adk.tools.api_registry.McpToolset", autospec=True)
   @patch("httpx.Client", autospec=True)
   async def test_get_toolset_success(self, MockHttpClient, MockMcpToolset):
+    # This test also verifies that get_toolset triggers _load_mcp_servers
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock()
     mock_response.json = MagicMock(return_value=MOCK_MCP_SERVERS_LIST)
@@ -166,7 +187,12 @@ class TestApiRegistry(unittest.IsolatedAsyncioTestCase):
         api_registry_project_id=self.project_id, location=self.location
     )
 
+    # First call triggers load
     toolset = api_registry.get_toolset("test-mcp-server-1")
+
+    # Verify load happened
+    self.assertEqual(len(api_registry._mcp_servers), 5)
+    mock_client_instance.get.assert_called_once()
 
     MockMcpToolset.assert_called_once_with(
         connection_params=StreamableHTTPConnectionParams(

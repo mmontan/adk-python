@@ -105,3 +105,22 @@ For **SSE** and **Streamable HTTP** connections, the session key is a hash of th
 ### Recommendations
 1.  **Stdio Isolation:** Do **not** share `McpTool` instances initialized with `StdioConnectionParams` across different users in a multi-tenant environment. Create a new `McpTool` (and `MCPSessionManager`) for each user session/invocation to ensure process isolation.
 2.  **Stateful Servers:** If connecting to a stateful MCP server via SSE/HTTP using shared credentials, ensure the server itself supports concurrency or that the ADK application artificially injects a user-specific header (e.g., `X-Adk-User-Id`) to force session segregation in the `MCPSessionManager` pool.
+
+## Sandbox Execution Analysis
+
+**Overview:**
+An analysis of `src/google/adk/code_executors/agent_engine_sandbox_code_executor.py` identifies critical implementation details that must be managed to avoid cross-user state leakage.
+
+### Shared Sandbox Resource Risk
+The `AgentEngineSandboxCodeExecutor` is initialized with a `sandbox_resource_name` (or creates one using `agent_engine_resource_name`).
+- **Singleton Pattern Risk:** If this executor is instantiated once (e.g., at application startup or as a global module-level object) and shared across requests, **all users will execute code in the exact same sandbox environment**.
+- **Implication:** Files created by User A (e.g., `secret_data.txt`) will be visible and accessible to User B. Environment variables or installed packages will also persist across invocations.
+
+### Lack of Native User Isolation
+The code execution API (`agent_engines.sandboxes.execute_code`) operates on a specific sandbox resource ID. It does not appear to natively support "per-user" contexts within a single sandbox resource. Isolation is achieved only by using distinct sandbox resources.
+
+### Recommendations
+1.  **Per-Session Instantiation:** The `AgentEngineSandboxCodeExecutor` should **not** be a singleton. It should be instantiated per-session or per-user.
+2.  **Dynamic Sandbox Assignment:** The application should dynamically create or assign a `sandbox_resource_name` for each unique session ID.
+    - *Secure Flow:* User logs in -> Create unique Sandbox -> Instantiate Executor with this Sandbox -> Execute Code -> Teardown Sandbox on logout/timeout.
+3.  **Warning:** Users of this class must be explicitly warned that reusing an instance across different users is a security vulnerability equivalent to giving all users shell access to the same machine.

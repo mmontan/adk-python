@@ -236,6 +236,21 @@ def test_prompt_for_google_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
   assert cli_create._prompt_for_google_api_key(None) == "api-key"
 
 
+def test_prompt_for_google_api_key_checks_hide_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  """Prompt should use hide_input=True for API key."""
+  captured_kwargs = {}
+
+  def fake_prompt(*_args: Any, **kwargs: Any) -> str:
+    captured_kwargs.update(kwargs)
+    return "api-key"
+
+  monkeypatch.setattr(click, "prompt", fake_prompt)
+  cli_create._prompt_for_google_api_key(None)
+  assert captured_kwargs.get("hide_input") is True
+
+
 def test_prompt_for_model_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
   """Selecting option '1' should return the default Gemini model string."""
   monkeypatch.setattr(click, "prompt", lambda *a, **k: "1")
@@ -291,6 +306,19 @@ def test_prompt_str_non_empty(monkeypatch: pytest.MonkeyPatch) -> None:
   responses = iter(["", " ", "valid"])
   monkeypatch.setattr(click, "prompt", lambda *_a, **_k: next(responses))
   assert cli_create._prompt_str("dummy") == "valid"
+
+
+def test_prompt_str_passes_hide_input(monkeypatch: pytest.MonkeyPatch) -> None:
+  """_prompt_str should pass hide_input to click.prompt."""
+  captured_kwargs = {}
+
+  def fake_prompt(*_args: Any, **kwargs: Any) -> str:
+    captured_kwargs.update(kwargs)
+    return "valid"
+
+  monkeypatch.setattr(click, "prompt", fake_prompt)
+  cli_create._prompt_str("prompt", hide_input=True)
+  assert captured_kwargs.get("hide_input") is True
 
 
 # gcloud fallback helpers

@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
 """Tool for web browse."""
+
+from __future__ import annotations
 
 import requests
 
@@ -31,10 +31,13 @@ def load_web_page(url: str) -> str:
   from bs4 import BeautifulSoup
 
   # Set allow_redirects=False to prevent SSRF attacks via redirection.
-  response = requests.get(url, allow_redirects=False)
+  # Set timeout to prevent indefinite hanging (DoS risk).
+  response = requests.get(url, allow_redirects=False, timeout=30)
 
   if response.status_code == 200:
-    soup = BeautifulSoup(response.content, 'lxml')
+    # Use html.parser instead of lxml to avoid hard dependency and potential
+    # XXE risks.
+    soup = BeautifulSoup(response.content, 'html.parser')
     text = soup.get_text(separator='\n', strip=True)
   else:
     text = f'Failed to fetch url: {url}'

@@ -71,6 +71,11 @@ def test_generate_files_with_api_key(agent_folder: Path) -> None:
   assert (agent_folder / "agent.py").exists()
   assert (agent_folder / "__init__.py").exists()
 
+  gitignore_content = (agent_folder / ".gitignore").read_text()
+  assert ".env" in gitignore_content
+  assert ".venv" in gitignore_content
+  assert ".adk/" in gitignore_content
+
 
 def test_generate_files_with_gcp(agent_folder: Path) -> None:
   """Files should be created with Vertex AI backend and correct .env flags."""
@@ -213,6 +218,11 @@ def test_run_cmd_with_type_config(
   env_file = agent_dir / ".env"
   assert env_file.exists()
   assert "GOOGLE_API_KEY=test-key" in env_file.read_text()
+
+  # Should create .gitignore
+  gitignore_file = agent_dir / ".gitignore"
+  assert gitignore_file.exists()
+  assert ".env" in gitignore_file.read_text()
 
 
 # Prompt helpers

@@ -70,6 +70,8 @@ def test_generate_files_with_api_key(agent_folder: Path) -> None:
   assert "GOOGLE_GENAI_USE_VERTEXAI=0" in env_content
   assert (agent_folder / "agent.py").exists()
   assert (agent_folder / "__init__.py").exists()
+  assert (agent_folder / ".gitignore").exists()
+  assert ".env" in (agent_folder / ".gitignore").read_text()
 
 
 def test_generate_files_with_gcp(agent_folder: Path) -> None:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -384,9 +385,13 @@ def test_to_gke_happy_path(
   ]
   assert creds_args == expected_creds_args
 
+  origin1 = shlex.quote("http://localhost:3000")
+  origin2 = shlex.quote("https://my-app.com")
+  assert f"--allow_origins={origin1}" in dockerfile_content
+  assert f"--allow_origins={origin2}" in dockerfile_content
   assert (
       "--allow_origins=http://localhost:3000,https://my-app.com"
-      in dockerfile_content
+      not in dockerfile_content
   )
 
   apply_args = run_recorder.calls[2][0][0]

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -166,9 +167,13 @@ def test_to_cloud_run_happy_path(
   else:
     assert "# No requirements.txt found." in dockerfile_content
 
+  origin1 = shlex.quote("http://localhost:3000")
+  origin2 = shlex.quote("https://my-app.com")
+  assert f"--allow_origins={origin1}" in dockerfile_content
+  assert f"--allow_origins={origin2}" in dockerfile_content
   assert (
       "--allow_origins=http://localhost:3000,https://my-app.com"
-      in dockerfile_content
+      not in dockerfile_content
   )
 
   assert len(run_recorder.calls) == 1

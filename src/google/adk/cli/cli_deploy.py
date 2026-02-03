@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from typing import Final
@@ -478,16 +479,16 @@ def _get_service_option_by_adk_version(
 
   if parsed_version >= parse('1.3.0'):
     if session_uri:
-      options.append(f'--session_service_uri={session_uri}')
+      options.append(f'--session_service_uri={shlex.quote(session_uri)}')
     if artifact_uri:
-      options.append(f'--artifact_service_uri={artifact_uri}')
+      options.append(f'--artifact_service_uri={shlex.quote(artifact_uri)}')
     if memory_uri:
-      options.append(f'--memory_service_uri={memory_uri}')
+      options.append(f'--memory_service_uri={shlex.quote(memory_uri)}')
   else:
     if session_uri:
-      options.append(f'--session_db_url={session_uri}')
+      options.append(f'--session_db_url={shlex.quote(session_uri)}')
     if parsed_version >= parse('1.2.0') and artifact_uri:
-      options.append(f'--artifact_storage_uri={artifact_uri}')
+      options.append(f'--artifact_storage_uri={shlex.quote(artifact_uri)}')
 
   if use_local_storage is not None and parsed_version >= parse(
       _LOCAL_STORAGE_FLAG_MIN_VERSION
@@ -592,7 +593,11 @@ def to_cloud_run(
     click.echo('Creating Dockerfile...')
     host_option = '--host=0.0.0.0' if adk_version > '0.5.0' else ''
     allow_origins_option = (
-        f'--allow_origins={",".join(allow_origins)}' if allow_origins else ''
+        ' '.join(
+            [f'--allow_origins={shlex.quote(origin)}' for origin in allow_origins]
+        )
+        if allow_origins
+        else ''
     )
     a2a_option = '--a2a' if a2a else ''
     dockerfile_content = _DOCKERFILE_TEMPLATE.format(
@@ -1095,7 +1100,11 @@ def to_gke(
     click.secho('✅ Environment prepared.', fg='green')
 
     allow_origins_option = (
-        f'--allow_origins={",".join(allow_origins)}' if allow_origins else ''
+        ' '.join(
+            [f'--allow_origins={shlex.quote(origin)}' for origin in allow_origins]
+        )
+        if allow_origins
+        else ''
     )
 
     # create Dockerfile

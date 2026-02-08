@@ -160,7 +160,7 @@ def test_to_cloud_run_happy_path(
   # Check agent dependencies installation based on include_requirements
   if include_requirements:
     assert (
-        'RUN pip install -r "/app/agents/agent/requirements.txt"'
+        'RUN pip install -r /app/agents/agent/requirements.txt'
         in dockerfile_content
     )
   else:
@@ -347,3 +347,47 @@ def test_cloud_run_label_merging(
   actual_labels = gcloud_args[labels_idx + 1]
 
   assert actual_labels == expected_labels
+
+def test_to_cloud_run_sanitization(
+    monkeypatch: pytest.MonkeyPatch,
+    agent_dir: AgentDirFixture,
+    tmp_path: Path,
+) -> None:
+  """Test that inputs are sanitized in the generated Dockerfile."""
+  src_dir = agent_dir(include_requirements=False, include_env=False)
+  # Mock subprocess.run to avoid actual execution
+  monkeypatch.setattr(subprocess, "run", _Recorder())
+  # Mock rmtree to inspect the temp folder
+  monkeypatch.setattr(shutil, "rmtree", lambda _x: None)
+
+  project = "my-project; echo pwned"
+  allow_origins = ['http://example.com"; echo "pwned']
+
+  cli_deploy.to_cloud_run(
+      agent_folder=str(src_dir),
+      project=project,
+      region="us-central1",
+      service_name="svc",
+      app_name="agent",
+      temp_folder=str(tmp_path),
+      port=8080,
+      trace_to_cloud=False,
+      otel_to_cloud=False,
+      with_ui=False,
+      log_level="info",
+      verbosity="info",
+      adk_version="1.0.0",
+      allow_origins=allow_origins,
+  )
+
+  dockerfile_path = tmp_path / "Dockerfile"
+  assert dockerfile_path.is_file()
+  content = dockerfile_path.read_text()
+
+  import shlex
+  # Check project sanitization
+  assert f"ENV GOOGLE_CLOUD_PROJECT={shlex.quote(project)}" in content
+
+  # Check allow_origins sanitization
+  expected_origin = f'--allow_origins={shlex.quote(",".join(allow_origins))}'
+  assert expected_origin in content

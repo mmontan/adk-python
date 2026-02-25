@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import threading
 import time
+import weakref
 
 from google.api_core.gapic_v1.client_info import ClientInfo
 from google.auth.credentials import Credentials
@@ -30,6 +31,16 @@ _CACHE_TTL = 1800  # 30 minutes
 
 _publisher_client_cache = {}
 _publisher_client_lock = threading.Lock()
+
+
+def _evict_publisher(key):
+  with _publisher_client_lock:
+    _publisher_client_cache.pop(key, None)
+
+
+def _evict_subscriber(key):
+  with _subscriber_client_lock:
+    _subscriber_client_cache.pop(key, None)
 
 
 def get_publisher_client(
@@ -87,6 +98,7 @@ def get_publisher_client(
     )
 
     _publisher_client_cache[key] = (publisher_client, current_time + _CACHE_TTL)
+    weakref.finalize(credentials, _evict_publisher, key)
 
     return publisher_client
 
@@ -146,6 +158,7 @@ def get_subscriber_client(
         subscriber_client,
         current_time + _CACHE_TTL,
     )
+    weakref.finalize(credentials, _evict_subscriber, key)
 
     return subscriber_client
 

@@ -2,25 +2,23 @@
 
 VULNERABILITY
 =============
-get_publisher_client() / get_subscriber_client() use id(credentials) as
-the cache key (client.py:62, 123).  id() is the object's memory address.
-When credentials are garbage-collected, that address is freed — but the
-cache entry lives for 30 minutes.  If a new credentials object lands at
-the same address, the cache returns the wrong (stale) client.
+get_publisher_client() uses id(credentials) as the cache key (client.py:62).
+id() is the object's memory address.  When credentials are GC'd that address
+is freed, but the 30-minute cache entry survives.  If a new credentials object
+lands at the same address, the cache returns the wrong (stale) client.
 
 HOW THE BUG IS TRIGGERED HERE
 ==============================
-1. Call get_publisher_client(credentials=creds_a)  → cache[addr_a] = client_a
-2. Reset the mock so it drops its internal reference to creds_a.
-   (MagicMock records call_args; without reset_mock() del creds_a is a no-op.)
-3. del creds_a  → refcount hits 0, memory freed immediately (no cycles).
-4. creds_b = FakeCredentials()  → CPython's LIFO free-list hands back addr_a.
-5. get_publisher_client(credentials=creds_b)  → cache hit → returns client_a.
+1. Patch pubsub_v1.PublisherClient with a plain function so no real GCP call
+   is made and — crucially — no framework records a reference to creds_a.
+2. Call get_publisher_client(credentials=creds_a) → cache[addr_a] = client_a.
+3. del creds_a → refcount hits 0, memory freed immediately (no cycles).
+4. creds_b = FakeCredentials() → CPython's LIFO free-list hands back addr_a.
+5. get_publisher_client(credentials=creds_b) → cache hit → returns client_a.
    User B now holds User A's GCP PublisherClient.
 """
 
 import sys
-from unittest import mock
 
 from google.adk.tools.pubsub import client as pubsub_client
 from google.cloud import pubsub_v1
@@ -30,16 +28,33 @@ class FakeCredentials:
   pass
 
 
+class FakeClient:
+  """Stand-in for pubsub_v1.PublisherClient."""
+
+  def __init__(self, name):
+    self.name = name
+
+  class transport:
+    @staticmethod
+    def close():
+      pass
+
+
+_client_counter = 0
+
+
+def _make_client(*args, **kwargs):
+  global _client_counter
+  _client_counter += 1
+  return FakeClient(f"Client#{_client_counter}")
+
+
 def main():
-  clients = []
+  # Patch PublisherClient so no real GCP call is made.
+  pubsub_v1.PublisherClient = _make_client
 
-  def make_client(*a, **kw):
-    m = mock.MagicMock(name=f"Client#{len(clients) + 1}")
-    clients.append(m)
-    return m
-
-  with mock.patch.object(pubsub_v1, "PublisherClient", side_effect=make_client) as mock_pub:
-    # Prime pymalloc so addr_a is in an existing pool, not a fresh arena.
+  try:
+    # Prime pymalloc so addr_a lands in an existing pool, not a fresh arena.
     _warmup = [FakeCredentials() for _ in range(64)]
     del _warmup
 
@@ -49,11 +64,10 @@ def main():
     client_a = pubsub_client.get_publisher_client(credentials=creds_a)
     print(f"[User A] address={hex(addr_a)}  client={client_a.name}")
 
-    # Release the mock's hidden reference to creds_a, then free creds_a.
-    mock_pub.reset_mock()
+    # Nothing else holds a reference to creds_a, so del frees it immediately.
     del creds_a
 
-    # User B — CPython LIFO gives back addr_a immediately.
+    # CPython LIFO free-list: next same-size allocation gets addr_a back.
     creds_b = FakeCredentials()
     print(f"[User B] address={hex(id(creds_b))}")
 
@@ -64,7 +78,8 @@ def main():
     client_b = pubsub_client.get_publisher_client(credentials=creds_b)
     print(f"[User B] client={client_b.name}")
 
-  pubsub_client.cleanup_clients()
+  finally:
+    pubsub_client.cleanup_clients()
 
   if client_b is client_a:
     print("\nBUG CONFIRMED: User B got User A's PublisherClient.")

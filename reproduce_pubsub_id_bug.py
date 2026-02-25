@@ -25,23 +25,24 @@ If User B's credentials object lands at the same memory address as User A's
 (already GC'd) credentials, the cache returns User A's client to User B,
 meaning User B publishes Pub/Sub messages using User A's GCP identity.
 
-No real GCP credentials or network access are required: pubsub_v1 classes
-are patched with mocks (same pattern as test_pubsub_client.py).
+Key insight: FakeCredentials has no __del__ and no reference cycles, so
+CPython frees the memory immediately when refcount drops to zero (del).
+CPython's pymalloc uses a LIFO free-list, so the very next allocation of
+the same size gets the just-freed address. The previous script failed
+because the MagicMock records call args (keeping creds_a alive) and the
+scanning loop kept recycling the candidate slot via LIFO instead of
+revisiting addr_a.
+
+No real GCP credentials or network access are required.
 """
 
 from __future__ import annotations
 
-import gc
 import sys
 from unittest import mock
 
 from google.adk.tools.pubsub import client as pubsub_client
 from google.cloud import pubsub_v1
-
-# ---------------------------------------------------------------------------
-# FakeCredentials: a trivially-sized object so CPython's pymalloc is likely
-# to hand its slot to the very next same-sized allocation after GC.
-# ---------------------------------------------------------------------------
 
 
 class FakeCredentials:
@@ -53,8 +54,6 @@ class FakeCredentials:
 # ---------------------------------------------------------------------------
 # Publisher bug demo
 # ---------------------------------------------------------------------------
-
-_MAX_ATTEMPTS = 10_000  # give up after this many allocations
 
 
 def demo_publisher_bug() -> bool:
@@ -69,11 +68,17 @@ def demo_publisher_bug() -> bool:
     clients_created.append(m)
     return m
 
+  # Capture the mock so we can reset it (releasing its reference to creds_a).
   with mock.patch.object(
       pubsub_v1,
       "PublisherClient",
       side_effect=publisher_side_effect,
-  ):
+  ) as mock_pub:
+    # Warmup: prime pymalloc's pool for FakeCredentials-sized objects so
+    # addr_a won't fall in a freshly-mapped arena page.
+    _warmup = [FakeCredentials() for _ in range(64)]
+    del _warmup
+
     # --- User A ---
     creds_a = FakeCredentials()
     addr_a = id(creds_a)
@@ -82,62 +87,55 @@ def demo_publisher_bug() -> bool:
     client_a = pubsub_client.get_publisher_client(credentials=creds_a)
     print(f"[User A] Got publisher client: {client_a}")
 
-    # Free User A's credentials; the cache entry for addr_a remains alive.
+    # The mock records call_args internally, keeping creds_a alive.
+    # Reset the mock so it drops its reference — otherwise del creds_a
+    # would not actually free the memory.
+    mock_pub.reset_mock()
+
+    # Now del creds_a truly drops the refcount to zero.
+    # FakeCredentials has no __del__ and no cycles, so CPython frees
+    # the memory immediately (reference counting, not GC).
     del creds_a
-    gc.collect()
+
+    # CPython's pymalloc free-list is LIFO: the next allocation of the
+    # same size class gets addr_a back.  No intervening print/loop/range
+    # calls — they would steal the slot.
+    creds_b = FakeCredentials()
+    addr_b = id(creds_b)
+
     print(
-        f"[User A] credentials deleted + GC'd. Address {hex(addr_a)} now free."
+        f"[User A] credentials deleted. Address {hex(addr_a)} is now free."
     )
     print(
-        f"         Cache still holds entry for {hex(addr_a)} (30-min TTL).\n"
+        f"         Cache still holds entry for {hex(addr_a)} (30-min TTL)."
     )
+    print(f"[User B] New credentials allocated at: {hex(addr_b)}")
 
-    # --- Scan for address reuse ---
-    print("[Scanning] Looking for address reuse...")
-    creds_b = None
-    found = False
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
-      candidate = FakeCredentials()
-      if id(candidate) == addr_a:
-        creds_b = candidate
-        found = True
-        print(
-            f"[User B] Address reused after {attempt} attempt(s):"
-            f" {hex(id(creds_b))} (same as User A)"
-        )
-        break
-      # Keep a reference to prevent immediate reuse on the next iteration;
-      # then release it so memory is actually freed.
-      del candidate
-
-    if not found:
+    if addr_b != addr_a:
       print(
-          f"[Scanning] Address {hex(addr_a)} was NOT reused in"
-          f" {_MAX_ATTEMPTS} attempts."
-      )
-      print(
-          "           This is unexpected on CPython. The bug still exists in"
-          " the code;\n"
-          "           address reuse just didn't occur in this run."
+          f"\nAddress NOT reused (expected {hex(addr_a)}, got {hex(addr_b)})."
+          "\nThis is unexpected on CPython with LIFO pymalloc."
+          "\nThe vulnerability still exists in the code even if not triggered"
+          " here."
       )
       return False
 
+    print(f"\n[User B] Address reused: {hex(addr_b)} == {hex(addr_a)}")
+
     # --- User B's call ---
     client_b = pubsub_client.get_publisher_client(credentials=creds_b)
-    print(f"[User B] Got publisher client: {client_b}\n")
+    print(f"[User B] Got publisher client: {client_b}")
 
     if client_b is client_a:
-      print("BUG CONFIRMED: User B received User A's PublisherClient.")
+      print("\nBUG CONFIRMED: User B received User A's PublisherClient.")
       print(
-          "User B will publish Pub/Sub messages using User A's GCP credentials."
+          "User B will publish Pub/Sub messages using User A's GCP"
+          " credentials."
       )
       return True
     else:
-      # This means a new client was created — address reuse happened but
-      # the cache key collision did not produce the wrong result, which
-      # would be unexpected given the code.
       print(
-          "UNEXPECTED: Address was reused but a new client was created."
+          "\nUNEXPECTED: Address was reused but a new client was created."
           " Check the cache logic."
       )
       return False
@@ -161,26 +159,30 @@ def demo_subscriber_bug() -> bool:
       pubsub_v1,
       "SubscriberClient",
       side_effect=subscriber_side_effect,
-  ):
+  ) as mock_sub:
+    _warmup = [FakeCredentials() for _ in range(64)]
+    del _warmup
+
     creds_a = FakeCredentials()
     addr_a = id(creds_a)
     client_a = pubsub_client.get_subscriber_client(credentials=creds_a)
 
+    mock_sub.reset_mock()
     del creds_a
-    gc.collect()
 
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
-      candidate = FakeCredentials()
-      if id(candidate) == addr_a:
-        client_b = pubsub_client.get_subscriber_client(credentials=candidate)
-        if client_b is client_a:
-          print(
-              f"[Subscriber] Same bug confirmed for get_subscriber_client"
-              f" (reuse after {attempt} attempt(s))."
-          )
-          return True
-        break
-      del candidate
+    creds_b = FakeCredentials()
+    if id(creds_b) == addr_a:
+      client_b = pubsub_client.get_subscriber_client(credentials=creds_b)
+      if client_b is client_a:
+        print(
+            f"[Subscriber] Same bug confirmed for get_subscriber_client."
+        )
+        return True
+    else:
+      print(
+          f"[Subscriber] Address not reused"
+          f" (got {hex(id(creds_b))}, wanted {hex(addr_a)})."
+      )
 
   return False
 
@@ -208,7 +210,9 @@ def main() -> None:
     sys.exit(0)
   elif publisher_bug:
     print("=" * 60)
-    print("RESULT: PARTIAL — publisher bug confirmed; subscriber not reproduced.")
+    print(
+        "RESULT: PARTIAL — publisher bug confirmed; subscriber not reproduced."
+    )
     print("=" * 60)
     sys.exit(1)
   else:

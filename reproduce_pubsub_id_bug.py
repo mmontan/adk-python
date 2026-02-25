@@ -25,14 +25,23 @@ from google.cloud import pubsub_v1
 
 
 class FakeCredentials:
-  pass
+  # __slots__ keeps the object layout fixed regardless of Python version,
+  # ensuring pymalloc uses a consistent size class and addr_a is reliably
+  # returned to the LIFO free-list on del.
+  __slots__ = ("token",)
+
+  def __init__(self, token):
+    self.token = token
 
 
 class FakeClient:
   """Stand-in for pubsub_v1.PublisherClient."""
 
-  def __init__(self, name):
+  def __init__(self, name, credentials):
     self.name = name
+    # Capture the token at client-creation time — mirrors how a real
+    # PublisherClient holds onto credentials for signing requests.
+    self.credentials_token = credentials.token
 
   class transport:
     @staticmethod
@@ -46,7 +55,7 @@ _client_counter = 0
 def _make_client(*args, **kwargs):
   global _client_counter
   _client_counter += 1
-  return FakeClient(f"Client#{_client_counter}")
+  return FakeClient(f"Client#{_client_counter}", kwargs["credentials"])
 
 
 def main():
@@ -55,35 +64,37 @@ def main():
 
   try:
     # Prime pymalloc so addr_a lands in an existing pool, not a fresh arena.
-    _warmup = [FakeCredentials() for _ in range(64)]
+    _warmup = [FakeCredentials("warmup") for _ in range(64)]
     del _warmup
 
     # User A
-    creds_a = FakeCredentials()
+    creds_a = FakeCredentials(token="secret-token-user-A")
     addr_a = id(creds_a)
     client_a = pubsub_client.get_publisher_client(credentials=creds_a)
-    print(f"[User A] address={hex(addr_a)}  client={client_a.name}")
+    print(f"[User A] token={creds_a.token}  address={hex(addr_a)}  "
+          f"client={client_a.name} (bound to token={client_a.credentials_token})")
 
     # Nothing else holds a reference to creds_a, so del frees it immediately.
     del creds_a
 
     # CPython LIFO free-list: next same-size allocation gets addr_a back.
-    creds_b = FakeCredentials()
-    print(f"[User B] address={hex(id(creds_b))}")
+    creds_b = FakeCredentials(token="secret-token-user-B")
+    print(f"[User B] token={creds_b.token}  address={hex(id(creds_b))}")
 
     if id(creds_b) != addr_a:
       print("FAIL: address not reused (unexpected on CPython).")
       sys.exit(1)
 
     client_b = pubsub_client.get_publisher_client(credentials=creds_b)
-    print(f"[User B] client={client_b.name}")
+    print(f"[User B] client={client_b.name} (bound to token={client_b.credentials_token})")
 
   finally:
     pubsub_client.cleanup_clients()
 
   if client_b is client_a:
     print("\nBUG CONFIRMED: User B got User A's PublisherClient.")
-    print("User B would publish using User A's GCP credentials.")
+    print(f"  Client is bound to token='{client_b.credentials_token}' — User A's secret.")
+    print(f"  User B's own token ('{creds_b.token}') was never used.")
     sys.exit(0)
   else:
     print("\nFAIL: cache returned a different client (unexpected).")

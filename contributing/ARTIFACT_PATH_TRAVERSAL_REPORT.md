@@ -24,11 +24,19 @@ While the service attempts to use `.resolve()` and `.relative_to()` to protect t
 
 If a `user_id` of `../../` is provided, the `scope_root` resolves to the application's parent directory. Any subsequent "safe" `filename` will then be written relative to that escaped directory.
 
+### 3. Logical Namespace Injection (GCS and In-Memory Services)
+While the `GcsArtifactService` and `InMemoryArtifactService` do not interact with the local filesystem, they share the same underlying vulnerability. They construct logical "paths" (GCS blob names or dictionary keys) using the same unsanitized `user_id` and `session_id` parameters.
+
+*   **Example Path Construction:** `f"{app_name}/{user_id}/{session_id}/{filename}"`
+*   **The Flaw:** By injecting slashes (e.g., `user_id="user1/user2"`), an attacker can manipulate the logical hierarchy of the storage.
+*   **Impact:** This can lead to "Namespace Confusion," where an attacker can write data into a path that a different user or application might be expected to own, potentially bypassing logical isolation checks in administrative or reporting tools.
+
 ## Impact
 An attacker can:
-1.  **Arbitrary File Write:** Upload malicious files (e.g., `.bashrc`, SSH `authorized_keys`, or configuration files) to any location the application has write access to.
+1.  **Arbitrary File Write (File Service):** Upload malicious files (e.g., `.bashrc`, SSH `authorized_keys`, or configuration files) to any location the application has write access to.
 2.  **Data Exfiltration:** Read any file on the system (within the enforced `/versions/{version}/` structure) by first saving a "fake" artifact that points to a sensitive location via path traversal in the ID.
 3.  **System Instability:** Delete critical system or application files by exploiting the `delete_artifact` endpoint with traversal IDs.
+4.  **Namespace Hijacking (GCS/Memory):** Cross-contaminate data between users or applications in the logical storage layer.
 
 ## Proof of Concept
 The following attack was successfully executed:

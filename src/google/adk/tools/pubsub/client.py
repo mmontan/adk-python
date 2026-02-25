@@ -99,6 +99,8 @@ def get_publisher_client(
 
     _publisher_client_cache[key] = (publisher_client, current_time + _CACHE_TTL)
     weakref.finalize(credentials, _evict_publisher, key)
+    if publisher_options is not None:
+      weakref.finalize(publisher_options, _evict_publisher, key)
 
     return publisher_client
 

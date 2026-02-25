@@ -98,6 +98,44 @@ def test_get_publisher_client_caching(mock_publisher_client):
   assert mock_publisher_client.call_count == 2
 
 
+@mock.patch.object(pubsub_v1, "PublisherClient", autospec=True)
+def test_get_publisher_client_evicts_on_publisher_options_gc(
+    mock_publisher_client,
+):
+  """Cache entry is evicted when publisher_options is GC'd."""
+  mock_creds = mock.create_autospec(Credentials, instance=True, spec_set=True)
+  mock_publisher_client.side_effect = [
+      mock.create_autospec(ORIG_PUBLISHER, instance=True, spec_set=True),
+      mock.create_autospec(ORIG_PUBLISHER, instance=True, spec_set=True),
+  ]
+
+  mock_options = mock.create_autospec(
+      pubsub_v1.types.PublisherOptions, instance=True, spec_set=True
+  )
+  client1 = client.get_publisher_client(
+      credentials=mock_creds, publisher_options=mock_options
+  )
+  mock_publisher_client.assert_called_once()
+
+  # GC the options object — the weakref.finalize callback should evict the
+  # cache entry even though credentials is still alive.
+  del mock_options
+  import gc
+
+  gc.collect()
+
+  # Next call with a new options object must create a fresh client, not return
+  # the stale cached one.
+  mock_options2 = mock.create_autospec(
+      pubsub_v1.types.PublisherOptions, instance=True, spec_set=True
+  )
+  client2 = client.get_publisher_client(
+      credentials=mock_creds, publisher_options=mock_options2
+  )
+  assert client2 is not client1
+  assert mock_publisher_client.call_count == 2
+
+
 @mock.patch.object(pubsub_v1, "SubscriberClient", autospec=True)
 def test_get_subscriber_client(mock_subscriber_client):
   """Test get_subscriber_client factory."""

@@ -593,7 +593,7 @@ def builder_test_client(
         session_service_uri="",
         artifact_service_uri="",
         memory_service_uri="",
-        allow_origins=["*"],
+        allow_origins=None,
         a2a=False,
         host="127.0.0.1",
         port=8000,
@@ -1116,6 +1116,57 @@ def test_agent_run_sse_splits_artifact_delta(
   assert sse_events[1]["actions"]["artifactDelta"] == {"artifact.txt": 0}
 
 
+def test_agent_run_sse_does_not_split_artifact_delta_for_function_resume(
+    test_app, create_test_session, monkeypatch
+):
+  """Test /run_sse keeps artifactDelta with content for function resume flow."""
+  info = create_test_session
+
+  async def run_async_with_artifact_delta(
+      self,
+      *,
+      user_id: str,
+      session_id: str,
+      invocation_id: Optional[str] = None,
+      new_message: Optional[types.Content] = None,
+      state_delta: Optional[dict[str, Any]] = None,
+      run_config: Optional[RunConfig] = None,
+  ):
+    del user_id, session_id, invocation_id, new_message, state_delta, run_config
+    yield Event(
+        author="dummy agent",
+        invocation_id="invocation_id",
+        content=types.Content(
+            role="model", parts=[types.Part(text="LLM reply")]
+        ),
+        actions=EventActions(artifact_delta={"artifact.txt": 0}),
+    )
+
+  monkeypatch.setattr(Runner, "run_async", run_async_with_artifact_delta)
+
+  payload = {
+      "app_name": info["app_name"],
+      "user_id": info["user_id"],
+      "session_id": info["session_id"],
+      "new_message": {"role": "user", "parts": [{"text": "Hello agent"}]},
+      "streaming": True,
+      "functionCallEventId": "function-call-event-id",
+  }
+
+  response = test_app.post("/run_sse", json=payload)
+  assert response.status_code == 200
+
+  sse_events = [
+      json.loads(line.removeprefix("data: "))
+      for line in response.text.splitlines()
+      if line.startswith("data: ")
+  ]
+
+  assert len(sse_events) == 1
+  assert sse_events[0]["content"]["parts"][0]["text"] == "LLM reply"
+  assert sse_events[0]["actions"]["artifactDelta"] == {"artifact.txt": 0}
+
+
 def test_agent_run_sse_yields_error_object_on_exception(
     test_app, create_test_session, monkeypatch
 ):
@@ -1542,6 +1593,46 @@ def test_builder_final_save_preserves_tools_and_cleans_tmp(
   assert not (tmp_path / "app" / "tmp" / "app").exists()
   tmp_dir = tmp_path / "app" / "tmp"
   assert not tmp_dir.exists() or not any(tmp_dir.iterdir())
+
+
+def test_builder_save_rejects_cross_origin_post(builder_test_client, tmp_path):
+  response = builder_test_client.post(
+      "/builder/save?tmp=true",
+      headers={"origin": "https://evil.com"},
+      files=[(
+          "files",
+          ("app/root_agent.yaml", b"name: app\n", "application/x-yaml"),
+      )],
+  )
+
+  assert response.status_code == 403
+  assert response.text == "Forbidden: origin not allowed"
+  assert not (tmp_path / "app" / "tmp" / "app").exists()
+
+
+def test_builder_save_allows_same_origin_post(builder_test_client, tmp_path):
+  response = builder_test_client.post(
+      "/builder/save?tmp=true",
+      headers={"origin": "http://testserver"},
+      files=[(
+          "files",
+          ("app/root_agent.yaml", b"name: app\n", "application/x-yaml"),
+      )],
+  )
+
+  assert response.status_code == 200
+  assert response.json() is True
+  assert (tmp_path / "app" / "tmp" / "app" / "root_agent.yaml").is_file()
+
+
+def test_builder_get_allows_cross_origin_get(builder_test_client):
+  response = builder_test_client.get(
+      "/builder/app/missing?tmp=true",
+      headers={"origin": "https://evil.com"},
+  )
+
+  assert response.status_code == 200
+  assert response.text == ""
 
 
 def test_builder_cancel_deletes_tmp_idempotent(builder_test_client, tmp_path):

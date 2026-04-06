@@ -823,6 +823,7 @@ def to_agent_engine(
     env_file: Optional[str] = None,
     agent_engine_config_file: Optional[str] = None,
     skip_agent_import_validation: bool = True,
+    agent_identity: bool = False,
 ):
   """Deploys an agent to Vertex AI Agent Engine.
 
@@ -890,6 +891,9 @@ def to_agent_engine(
       skip the pre-deployment import validation of `agent.py`. This can be
       useful when the local environment does not have the same dependencies as
       the deployment environment.
+    agent_identity (bool): Optional. Default is False. If True, the agent is
+      created with AGENT_IDENTITY as the identity type. The service_account
+      field must not be set when using this option.
   """
   app_name = os.path.basename(agent_folder)
   display_name = display_name or app_name
@@ -1131,6 +1135,8 @@ def to_agent_engine(
     agent_config['source_packages'] = [temp_folder]
     agent_config['class_methods'] = _AGENT_ENGINE_CLASS_METHODS
     agent_config['agent_framework'] = 'google-adk'
+    if agent_identity:
+      agent_config['identity_type'] = 'AGENT_IDENTITY'
 
     if not agent_engine_id:
       agent_engine = client.agent_engines.create(config=agent_config)

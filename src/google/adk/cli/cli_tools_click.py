@@ -2093,6 +2093,17 @@ def cli_migrate_session(
         " the default; use --validate-agent-import to enable validation."
     ),
 )
+@click.option(
+    "--agent-identity",
+    "agent_identity",
+    is_flag=True,
+    default=False,
+    help=(
+        "Optional. When set, the agent is created with AGENT_IDENTITY as the"
+        " identity type. The service_account field must not be set when using"
+        " this option."
+    ),
+)
 @click.argument(
     "agent",
     type=click.Path(
@@ -2119,6 +2130,7 @@ def cli_deploy_agent_engine(
     agent_engine_config_file: str,
     validate_agent_import: bool = False,
     skip_agent_import_validation_alias: bool = False,
+    agent_identity: bool = False,
 ):
   """Deploys an agent to Agent Engine.
 
@@ -2158,6 +2170,7 @@ def cli_deploy_agent_engine(
         absolutize_imports=absolutize_imports,
         agent_engine_config_file=agent_engine_config_file,
         skip_agent_import_validation=not validate_agent_import,
+        agent_identity=agent_identity,
     )
   except Exception as e:
     click.secho(f"Deploy failed: {e}", fg="red", err=True)

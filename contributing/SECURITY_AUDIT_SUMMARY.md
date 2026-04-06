@@ -2,8 +2,33 @@
 
 This document summarizes the findings of a comprehensive security audit of the ADK-Python framework, conducted in March 2026. The audit focused on multi-tenancy, cross-user isolation, and secure tool execution.
 
+## Revision History
+
+| Date | Change |
+|------|--------|
+| 2026-03-23 | Initial audit — 11 findings identified |
+| 2026-04-06 | Follow-up review of commits merged 2026-03-24 – 2026-04-04. Two partial mitigations landed; two new findings added; one previously undetected exfiltration path confirmed and closed. Net finding count: **13**. |
+
+## Remediation Status (as of 2026-04-06)
+
+| Finding | Severity | Status |
+|---------|----------|--------|
+| IDOR — session/artifact endpoints | Critical | **Active** |
+| Unauthenticated agent graph endpoint (`/dev/{app_name}/graph`) | High | **Active** (new, added 2026-03-28) |
+| Auth credential race condition (shared toolset) | Critical | **Active** |
+| Agent Registry widens credential surface | High | **Active** (new, added 2026-04-03) |
+| Shared MCP stdio session key | Critical | **Active** |
+| Shared `app_state` in `InMemorySessionService` | High | **Partially mitigated** — session copies prevent accidental mutation; `app_state` cross-user visibility unchanged |
+| Credentials in session state | Medium | **Active** |
+| BigQuery plugin logging plain-text credentials | High | **Fixed** (commit `a27ce477`, 2026-03-30) |
+| Identity leakage via MCP credential forwarding | Critical | **Active** |
+| Artifact path traversal | Critical | **Active** |
+| RCE via MCP stdio / unauthenticated file upload | Critical | **Partially mitigated** — builder endpoints now gated behind `web` flag and restricted to `.yaml`/`.yml`; YAML `args` key blocked (commits `6c24ccc9`, `dcee2902`); endpoints still unauthenticated when `web=True` |
+| Computer use data leakage | High | **Active** |
+| SSRF in `load_web_page` | High | **Active** |
+
 ## Executive Summary
-The audit identified **11 critical and high-severity vulnerabilities** that fundamentally compromise user isolation, data privacy, and system integrity in multi-tenant or public-facing deployments. The root cause is a systemic architectural reliance on **shared state** across authenticated users.
+The audit identified **11 critical and high-severity vulnerabilities** that fundamentally compromise user isolation, data privacy, and system integrity in multi-tenant or public-facing deployments. Two additional findings have been identified during follow-up review, bringing the total to **13**. The root cause is a systemic architectural reliance on **shared state** across authenticated users.
 
 ## 1. The Core Architectural Flaw: Shared State
 The `AdkWebServer` caches and reuses `Runner`, `Agent`, and `Tool` instances across all users. This "Shared Runner" model breaks the fundamental security boundary between different authenticated users, leading to systematic data leakage and identity theft.

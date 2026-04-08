@@ -17,6 +17,7 @@ from datetime import datetime
 import importlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -598,16 +599,16 @@ def _get_service_option_by_adk_version(
 
   if parsed_version >= parse('1.3.0'):
     if session_uri:
-      options.append(f'--session_service_uri={session_uri}')
+      options.append(shlex.quote(f'--session_service_uri={session_uri}'))
     if artifact_uri:
-      options.append(f'--artifact_service_uri={artifact_uri}')
+      options.append(shlex.quote(f'--artifact_service_uri={artifact_uri}'))
     if memory_uri:
-      options.append(f'--memory_service_uri={memory_uri}')
+      options.append(shlex.quote(f'--memory_service_uri={memory_uri}'))
   else:
     if session_uri:
-      options.append(f'--session_db_url={session_uri}')
+      options.append(shlex.quote(f'--session_db_url={session_uri}'))
     if parsed_version >= parse('1.2.0') and artifact_uri:
-      options.append(f'--artifact_storage_uri={artifact_uri}')
+      options.append(shlex.quote(f'--artifact_storage_uri={artifact_uri}'))
 
   if use_local_storage is not None and parsed_version >= parse(
       _LOCAL_STORAGE_FLAG_MIN_VERSION
@@ -615,11 +616,13 @@ def _get_service_option_by_adk_version(
     # Only valid when session/artifact URIs are unset; otherwise the CLI
     # rejects the combination to avoid confusing precedence.
     if session_uri is None and artifact_uri is None:
-      options.append((
-          '--use_local_storage'
-          if use_local_storage
-          else '--no_use_local_storage'
-      ))
+      options.append(
+          shlex.quote(
+              '--use_local_storage'
+              if use_local_storage
+              else '--no_use_local_storage'
+          )
+      )
 
   return ' '.join(options)
 
@@ -710,11 +713,15 @@ def to_cloud_run(
 
     # create Dockerfile
     click.echo('Creating Dockerfile...')
-    host_option = '--host=0.0.0.0' if adk_version > '0.5.0' else ''
-    allow_origins_option = (
-        f'--allow_origins={",".join(allow_origins)}' if allow_origins else ''
+    host_option = (
+        shlex.quote('--host=0.0.0.0') if adk_version > '0.5.0' else ''
     )
-    a2a_option = '--a2a' if a2a else ''
+    allow_origins_option = (
+        shlex.quote(f'--allow_origins={",".join(allow_origins)}')
+        if allow_origins
+        else ''
+    )
+    a2a_option = shlex.quote('--a2a') if a2a else ''
     dockerfile_content = _DOCKERFILE_TEMPLATE.format(
         gcp_project_id=project,
         gcp_region=region,
@@ -729,8 +736,12 @@ def to_cloud_run(
             memory_service_uri,
             use_local_storage,
         ),
-        trace_to_cloud_option='--trace_to_cloud' if trace_to_cloud else '',
-        otel_to_cloud_option='--otel_to_cloud' if otel_to_cloud else '',
+        trace_to_cloud_option=(
+            shlex.quote('--trace_to_cloud') if trace_to_cloud else ''
+        ),
+        otel_to_cloud_option=(
+            shlex.quote('--otel_to_cloud') if otel_to_cloud else ''
+        ),
         allow_origins_option=allow_origins_option,
         adk_version=adk_version,
         host_option=host_option,
@@ -1241,13 +1252,17 @@ def to_gke(
     click.secho('✅ Environment prepared.', fg='green')
 
     allow_origins_option = (
-        f'--allow_origins={",".join(allow_origins)}' if allow_origins else ''
+        shlex.quote(f'--allow_origins={",".join(allow_origins)}')
+        if allow_origins
+        else ''
     )
 
     # create Dockerfile
     click.secho('\nSTEP 2: Generating deployment files...', bold=True)
     click.echo('  - Creating Dockerfile...')
-    host_option = '--host=0.0.0.0' if adk_version > '0.5.0' else ''
+    host_option = (
+        shlex.quote('--host=0.0.0.0') if adk_version > '0.5.0' else ''
+    )
     dockerfile_content = _DOCKERFILE_TEMPLATE.format(
         gcp_project_id=project,
         gcp_region=region,
@@ -1262,12 +1277,16 @@ def to_gke(
             memory_service_uri,
             use_local_storage,
         ),
-        trace_to_cloud_option='--trace_to_cloud' if trace_to_cloud else '',
-        otel_to_cloud_option='--otel_to_cloud' if otel_to_cloud else '',
+        trace_to_cloud_option=(
+            shlex.quote('--trace_to_cloud') if trace_to_cloud else ''
+        ),
+        otel_to_cloud_option=(
+            shlex.quote('--otel_to_cloud') if otel_to_cloud else ''
+        ),
         allow_origins_option=allow_origins_option,
         adk_version=adk_version,
         host_option=host_option,
-        a2a_option='--a2a' if a2a else '',
+        a2a_option=shlex.quote('--a2a') if a2a else '',
     )
     dockerfile_path = os.path.join(temp_folder, 'Dockerfile')
     os.makedirs(temp_folder, exist_ok=True)

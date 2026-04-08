@@ -17,6 +17,7 @@ from datetime import datetime
 import importlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -89,7 +90,7 @@ RUN pip install google-adk=={adk_version}
 # Copy agent - Start
 
 # Set permission
-COPY --chown=myuser:myuser "agents/{app_name}/" "/app/agents/{app_name}/"
+COPY --chown=myuser:myuser {agent_src} {agent_dest}
 
 # Copy agent - End
 
@@ -598,16 +599,16 @@ def _get_service_option_by_adk_version(
 
   if parsed_version >= parse('1.3.0'):
     if session_uri:
-      options.append(f'--session_service_uri={session_uri}')
+      options.append(f'--session_service_uri={shlex.quote(session_uri)}')
     if artifact_uri:
-      options.append(f'--artifact_service_uri={artifact_uri}')
+      options.append(f'--artifact_service_uri={shlex.quote(artifact_uri)}')
     if memory_uri:
-      options.append(f'--memory_service_uri={memory_uri}')
+      options.append(f'--memory_service_uri={shlex.quote(memory_uri)}')
   else:
     if session_uri:
-      options.append(f'--session_db_url={session_uri}')
+      options.append(f'--session_db_url={shlex.quote(session_uri)}')
     if parsed_version >= parse('1.2.0') and artifact_uri:
-      options.append(f'--artifact_storage_uri={artifact_uri}')
+      options.append(f'--artifact_storage_uri={shlex.quote(artifact_uri)}')
 
   if use_local_storage is not None and parsed_version >= parse(
       _LOCAL_STORAGE_FLAG_MIN_VERSION
@@ -701,8 +702,11 @@ def to_cloud_run(
     agent_src_path = os.path.join(temp_folder, 'agents', app_name)
     shutil.copytree(agent_folder, agent_src_path)
     requirements_txt_path = os.path.join(agent_src_path, 'requirements.txt')
+    install_agent_deps_path = shlex.quote(
+        f'/app/agents/{app_name}/requirements.txt'
+    )
     install_agent_deps = (
-        f'RUN pip install -r "/app/agents/{app_name}/requirements.txt"'
+        f'RUN pip install -r {install_agent_deps_path}'
         if os.path.exists(requirements_txt_path)
         else '# No requirements.txt found.'
     )
@@ -711,13 +715,25 @@ def to_cloud_run(
     # create Dockerfile
     click.echo('Creating Dockerfile...')
     host_option = '--host=0.0.0.0' if adk_version > '0.5.0' else ''
+    quoted_origins = (
+        [shlex.quote(o) for o in allow_origins] if allow_origins else []
+    )
+    sep = ','
     allow_origins_option = (
-        f'--allow_origins={",".join(allow_origins)}' if allow_origins else ''
+        f'--allow_origins={sep.join(quoted_origins)}' if quoted_origins else ''
     )
     a2a_option = '--a2a' if a2a else ''
+    gcp_project_id = shlex.quote(project) if project else ''
+    gcp_region = shlex.quote(region) if region else ''
+    agent_src = shlex.quote(f'agents/{app_name}/')
+    agent_dest = shlex.quote(f'/app/agents/{app_name}/')
+    quoted_adk_version = shlex.quote(adk_version)
+
     dockerfile_content = _DOCKERFILE_TEMPLATE.format(
-        gcp_project_id=project,
-        gcp_region=region,
+        gcp_project_id=gcp_project_id,
+        gcp_region=gcp_region,
+        agent_src=agent_src,
+        agent_dest=agent_dest,
         app_name=app_name,
         port=port,
         command='web' if with_ui else 'api_server',
@@ -732,7 +748,7 @@ def to_cloud_run(
         trace_to_cloud_option='--trace_to_cloud' if trace_to_cloud else '',
         otel_to_cloud_option='--otel_to_cloud' if otel_to_cloud else '',
         allow_origins_option=allow_origins_option,
-        adk_version=adk_version,
+        adk_version=quoted_adk_version,
         host_option=host_option,
         a2a_option=a2a_option,
     )
@@ -1233,24 +1249,39 @@ def to_gke(
     agent_src_path = os.path.join(temp_folder, 'agents', app_name)
     shutil.copytree(agent_folder, agent_src_path)
     requirements_txt_path = os.path.join(agent_src_path, 'requirements.txt')
+    install_agent_deps_path = shlex.quote(
+        f'/app/agents/{app_name}/requirements.txt'
+    )
     install_agent_deps = (
-        f'RUN pip install -r "/app/agents/{app_name}/requirements.txt"'
+        f'RUN pip install -r {install_agent_deps_path}'
         if os.path.exists(requirements_txt_path)
         else ''
     )
     click.secho('✅ Environment prepared.', fg='green')
 
+    quoted_origins = (
+        [shlex.quote(o) for o in allow_origins] if allow_origins else []
+    )
+    sep = ','
     allow_origins_option = (
-        f'--allow_origins={",".join(allow_origins)}' if allow_origins else ''
+        f'--allow_origins={sep.join(quoted_origins)}' if quoted_origins else ''
     )
 
     # create Dockerfile
     click.secho('\nSTEP 2: Generating deployment files...', bold=True)
     click.echo('  - Creating Dockerfile...')
     host_option = '--host=0.0.0.0' if adk_version > '0.5.0' else ''
+    gcp_project_id = shlex.quote(project) if project else ''
+    gcp_region = shlex.quote(region) if region else ''
+    agent_src = shlex.quote(f'agents/{app_name}/')
+    agent_dest = shlex.quote(f'/app/agents/{app_name}/')
+    quoted_adk_version = shlex.quote(adk_version)
+
     dockerfile_content = _DOCKERFILE_TEMPLATE.format(
-        gcp_project_id=project,
-        gcp_region=region,
+        gcp_project_id=gcp_project_id,
+        gcp_region=gcp_region,
+        agent_src=agent_src,
+        agent_dest=agent_dest,
         app_name=app_name,
         port=port,
         command='web' if with_ui else 'api_server',
@@ -1265,7 +1296,7 @@ def to_gke(
         trace_to_cloud_option='--trace_to_cloud' if trace_to_cloud else '',
         otel_to_cloud_option='--otel_to_cloud' if otel_to_cloud else '',
         allow_origins_option=allow_origins_option,
-        adk_version=adk_version,
+        adk_version=quoted_adk_version,
         host_option=host_option,
         a2a_option='--a2a' if a2a else '',
     )

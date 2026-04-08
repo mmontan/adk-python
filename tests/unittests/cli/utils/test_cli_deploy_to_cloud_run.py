@@ -159,7 +159,7 @@ def test_to_cloud_run_happy_path(
   # Check agent dependencies installation based on include_requirements
   if include_requirements:
     assert (
-        'RUN pip install -r "/app/agents/agent/requirements.txt"'
+        "RUN pip install -r /app/agents/agent/requirements.txt"
         in dockerfile_content
     )
   else:

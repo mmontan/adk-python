@@ -17,6 +17,7 @@ from datetime import datetime
 import importlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -703,7 +704,8 @@ def to_cloud_run(
     shutil.copytree(agent_folder, agent_src_path)
     requirements_txt_path = os.path.join(agent_src_path, 'requirements.txt')
     install_agent_deps = (
-        f'RUN pip install -r "/app/agents/{app_name}/requirements.txt"'
+        'RUN pip install -r /app/agents/'
+        f'{shlex.quote(app_name)}/requirements.txt'
         if os.path.exists(requirements_txt_path)
         else '# No requirements.txt found.'
     )
@@ -720,8 +722,8 @@ def to_cloud_run(
         f'--trigger_sources={trigger_sources}' if trigger_sources else ''
     )
     dockerfile_content = _DOCKERFILE_TEMPLATE.format(
-        gcp_project_id=project,
-        gcp_region=region,
+        gcp_project_id=shlex.quote(project) if project else '',
+        gcp_region=shlex.quote(region) if region else '',
         app_name=app_name,
         port=port,
         command='web' if with_ui else 'api_server',
@@ -736,7 +738,7 @@ def to_cloud_run(
         trace_to_cloud_option='--trace_to_cloud' if trace_to_cloud else '',
         otel_to_cloud_option='--otel_to_cloud' if otel_to_cloud else '',
         allow_origins_option=allow_origins_option,
-        adk_version=adk_version,
+        adk_version=shlex.quote(adk_version),
         host_option=host_option,
         a2a_option=a2a_option,
         trigger_sources_option=trigger_sources_option,
@@ -1267,7 +1269,8 @@ def to_gke(
     shutil.copytree(agent_folder, agent_src_path)
     requirements_txt_path = os.path.join(agent_src_path, 'requirements.txt')
     install_agent_deps = (
-        f'RUN pip install -r "/app/agents/{app_name}/requirements.txt"'
+        'RUN pip install -r /app/agents/'
+        f'{shlex.quote(app_name)}/requirements.txt'
         if os.path.exists(requirements_txt_path)
         else ''
     )
@@ -1282,8 +1285,8 @@ def to_gke(
     click.echo('  - Creating Dockerfile...')
     host_option = '--host=0.0.0.0' if adk_version > '0.5.0' else ''
     dockerfile_content = _DOCKERFILE_TEMPLATE.format(
-        gcp_project_id=project,
-        gcp_region=region,
+        gcp_project_id=shlex.quote(project) if project else '',
+        gcp_region=shlex.quote(region) if region else '',
         app_name=app_name,
         port=port,
         command='web' if with_ui else 'api_server',
@@ -1298,7 +1301,7 @@ def to_gke(
         trace_to_cloud_option='--trace_to_cloud' if trace_to_cloud else '',
         otel_to_cloud_option='--otel_to_cloud' if otel_to_cloud else '',
         allow_origins_option=allow_origins_option,
-        adk_version=adk_version,
+        adk_version=shlex.quote(adk_version),
         host_option=host_option,
         a2a_option='--a2a' if a2a else '',
         trigger_sources_option=(

@@ -159,7 +159,7 @@ def test_to_cloud_run_happy_path(
   # Check agent dependencies installation based on include_requirements
   if include_requirements:
     assert (
-        'RUN pip install -r "/app/agents/agent/requirements.txt"'
+        'RUN pip install -r /app/agents/agent/requirements.txt'
         in dockerfile_content
     )
   else:
@@ -194,6 +194,74 @@ def test_to_cloud_run_happy_path(
   assert gcloud_args == expected_gcloud_command
 
   assert str(rmtree_recorder.get_last_call_args()[0]) == str(tmp_path)
+
+
+def test_to_cloud_run_sanitization(
+    monkeypatch: pytest.MonkeyPatch,
+    agent_dir: AgentDirFixture,
+    tmp_path: Path,
+) -> None:
+  """Test that inputs are sanitized in the generated Dockerfile."""
+  src_dir = agent_dir(include_requirements=True, include_env=False)
+  run_recorder = _Recorder()
+  monkeypatch.setattr(subprocess, "run", run_recorder)
+  monkeypatch.setattr(shutil, "rmtree", lambda _x: None)
+
+  # Malicious inputs
+  malicious_app_name = 'agent" && echo "hacked'
+  malicious_project = 'proj; rm -rf /'
+
+  cli_deploy.to_cloud_run(
+      agent_folder=str(src_dir),
+      project=malicious_project,
+      region="asia-northeast1",
+      service_name="svc",
+      app_name=malicious_app_name,
+      temp_folder=str(tmp_path),
+      port=8080,
+      trace_to_cloud=True,
+      otel_to_cloud=True,
+      with_ui=False,
+      log_level="info",
+      verbosity="info",
+      adk_version="1.3.0",
+  )
+
+  dockerfile_path = tmp_path / "Dockerfile"
+  content = dockerfile_path.read_text()
+
+  # Check that app_name is quoted in the RUN instruction
+  # shlex.quote('agent" && echo "hacked') -> 'agent" && echo "hacked'
+  expected_sanitized_path = "/app/agents/'agent\" && echo \"hacked'/requirements.txt"
+  assert expected_sanitized_path in content
+
+  # Check project is quoted
+  # shlex.quote('proj; rm -rf /') -> 'proj; rm -rf /'
+  expected_sanitized_project = "ENV GOOGLE_CLOUD_PROJECT='proj; rm -rf /'"
+  assert expected_sanitized_project in content
+
+  assert len(run_recorder.calls) == 1
+  gcloud_args = run_recorder.get_last_call_args()[0]
+
+  expected_gcloud_command = [
+      cli_deploy._GCLOUD_CMD,
+      "run",
+      "deploy",
+      "svc",
+      "--source",
+      str(tmp_path),
+      "--project",
+          malicious_project,
+      "--region",
+      "asia-northeast1",
+      "--port",
+      "8080",
+      "--verbosity",
+      "info",
+      "--labels",
+      "created-by=adk",
+  ]
+  assert gcloud_args == expected_gcloud_command
 
 
 def test_to_cloud_run_cleans_temp_dir(

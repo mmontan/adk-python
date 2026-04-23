@@ -47,6 +47,25 @@ instruction: Answer user questions to the best of your knowledge
 model: {model_name}
 """
 
+_GITIGNORE_TEMPLATE = """\
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ADK
+.adk/
+"""
+
 
 _GOOGLE_API_MSG = """
 Don't have API Key? Create one in AI Studio: https://aistudio.google.com/apikey
@@ -78,6 +97,7 @@ https://google.github.io/adk-docs/get-started/quickstart/#gemini---google-cloud-
 _SUCCESS_MSG_CODE = """
 Agent created in {agent_folder}:
 - .env
+- .gitignore
 - __init__.py
 - agent.py
 
@@ -88,6 +108,7 @@ Please ensure .env is added to your .gitignore to avoid committing secrets to ve
 _SUCCESS_MSG_CONFIG = """
 Agent created in {agent_folder}:
 - .env
+- .gitignore
 - __init__.py
 - root_agent.yaml
 
@@ -201,9 +222,13 @@ def _generate_files(
   os.makedirs(agent_folder, exist_ok=True)
 
   dotenv_file_path = os.path.join(agent_folder, ".env")
+  gitignore_file_path = os.path.join(agent_folder, ".gitignore")
   init_file_path = os.path.join(agent_folder, "__init__.py")
   agent_py_file_path = os.path.join(agent_folder, "agent.py")
   agent_config_file_path = os.path.join(agent_folder, "root_agent.yaml")
+
+  with open(gitignore_file_path, "w", encoding="utf-8") as f:
+    f.write(_GITIGNORE_TEMPLATE)
 
   with open(dotenv_file_path, "w", encoding="utf-8") as f:
     lines = []

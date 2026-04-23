@@ -165,10 +165,8 @@ def test_to_cloud_run_happy_path(
   else:
     assert "# No requirements.txt found." in dockerfile_content
 
-  assert (
-      "--allow_origins=http://localhost:3000,https://my-app.com"
-      in dockerfile_content
-  )
+  assert "--allow_origins=http://localhost:3000" in dockerfile_content
+  assert "--allow_origins=https://my-app.com" in dockerfile_content
 
   assert len(run_recorder.calls) == 1
   gcloud_args = run_recorder.get_last_call_args()[0]

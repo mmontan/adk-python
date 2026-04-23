@@ -531,10 +531,8 @@ def test_to_gke_happy_path(
   ]
   assert creds_args == expected_creds_args
 
-  assert (
-      "--allow_origins=http://localhost:3000,https://my-app.com"
-      in dockerfile_content
-  )
+  assert "--allow_origins=http://localhost:3000" in dockerfile_content
+  assert "--allow_origins=https://my-app.com" in dockerfile_content
 
   apply_args = run_recorder.calls[2][0][0]
   expected_apply_args = ["kubectl", "apply", "-f", str(tmp_path)]

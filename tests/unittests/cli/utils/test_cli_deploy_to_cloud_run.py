@@ -159,16 +159,14 @@ def test_to_cloud_run_happy_path(
   # Check agent dependencies installation based on include_requirements
   if include_requirements:
     assert (
-        'RUN pip install -r "/app/agents/agent/requirements.txt"'
+        'RUN pip install -r /app/agents/agent/requirements.txt'
         in dockerfile_content
     )
   else:
     assert "# No requirements.txt found." in dockerfile_content
 
-  assert (
-      "--allow_origins=http://localhost:3000,https://my-app.com"
-      in dockerfile_content
-  )
+  assert "--allow_origins=http://localhost:3000" in dockerfile_content
+  assert "--allow_origins=https://my-app.com" in dockerfile_content
 
   assert len(run_recorder.calls) == 1
   gcloud_args = run_recorder.get_last_call_args()[0]

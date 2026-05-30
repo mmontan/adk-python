@@ -129,12 +129,16 @@ def _prompt_str(
     *,
     prior_msg: Optional[str] = None,
     default_value: Optional[str] = None,
+    hide_input: bool = False,
 ) -> str:
   if prior_msg:
     click.secho(prior_msg, fg="green")
   while True:
     value: str = click.prompt(
-        prompt_prefix, default=default_value or None, type=str
+        prompt_prefix,
+        default=default_value or None,
+        type=str,
+        hide_input=hide_input,
     )
     if value and value.strip():
       return value.strip()
@@ -184,6 +188,7 @@ def _prompt_for_google_api_key(
       "Enter Google API key",
       prior_msg=_GOOGLE_API_MSG,
       default_value=google_api_key,
+      hide_input=True,
   )
   return google_api_key
 

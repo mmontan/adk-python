@@ -12,11 +12,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
 """Tool for web browse."""
 
+from __future__ import annotations
+
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
 import requests
+
+
+def _validate_url(url: str) -> bool:
+  """Validates if the URL is safe to browse."""
+  try:
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https'):
+      return False
+
+    hostname = parsed.hostname
+    if not hostname:
+      return False
+
+    # Check if hostname is an IP literal
+    try:
+      ip = ipaddress.ip_address(hostname)
+      if (
+          ip.is_loopback
+          or ip.is_private
+          or ip.is_link_local
+          or ip.is_reserved
+          or ip.is_multicast
+      ):
+        return False
+      return True
+    except ValueError:
+      pass  # Not an IP literal
+
+    # Resolve hostname to IP
+    try:
+      ip_str = socket.gethostbyname(hostname)
+      ip = ipaddress.ip_address(ip_str)
+      if (
+          ip.is_loopback
+          or ip.is_private
+          or ip.is_link_local
+          or ip.is_reserved
+          or ip.is_multicast
+      ):
+        return False
+    except socket.error:
+      return False
+
+    return True
+  except Exception:  # pylint: disable=broad-exception-caught
+    return False
 
 
 def load_web_page(url: str) -> str:
@@ -30,8 +80,11 @@ def load_web_page(url: str) -> str:
   """
   from bs4 import BeautifulSoup
 
+  if not _validate_url(url):
+    return f'Failed to fetch url: {url} (URL not allowed)'
+
   # Set allow_redirects=False to prevent SSRF attacks via redirection.
-  response = requests.get(url, allow_redirects=False)
+  response = requests.get(url, allow_redirects=False, timeout=10)
 
   if response.status_code == 200:
     soup = BeautifulSoup(response.content, 'lxml')
